@@ -1066,6 +1066,11 @@ function renderForumTab() {
 
   const filteredTopics = state.topics
     .filter((t) => {
+      const topicStatus = t.status || "approved";
+      // Regular users only see approved topics (plus their own pending submission)
+      if (!state.isAdmin && topicStatus !== "approved" && t.authorId !== state.user.uid) {
+        return false;
+      }
       if (state.forumCategoryFilter !== "ALL" && t.categoryId !== state.forumCategoryFilter) {
         return false;
       }
@@ -1082,28 +1087,35 @@ function renderForumTab() {
   if (filteredTopics.length === 0) {
     listEl.innerHTML = `
       <div class="dashboard-card" style="text-align:center; padding:32px;">
-        <h3>No Forum Topics Match Your Filter Yet</h3>
-        <p class="muted" style="margin:8px 0 16px;">Be the first to share a catch report, bait tip, or mark question for this venue!</p>
-        <button type="button" class="btn btn-primary" id="btnEmptyForumNewTopic">✍️ + Start First Topic</button>
+        <h3>No Approved Forum Subjects Match Your Filter Yet</h3>
+        <p class="muted" style="margin:8px 0 16px;">Submit a new subject below—it will appear once approved by the Admin!</p>
+        <button type="button" class="btn btn-primary" id="btnEmptyForumNewTopic">✍️ + Submit New Subject</button>
       </div>
     `;
     document.getElementById("btnEmptyForumNewTopic")?.addEventListener("click", () => {
-      document.getElementById("newTopicModal")?.classList.remove("hidden");
+      openNewTopicModal();
     });
     return;
   }
 
   listEl.innerHTML = "";
   filteredTopics.forEach((topic) => {
+    const topicStatus = topic.status || "approved";
+    const isPending = topicStatus === "pending";
     const cat = FORUM_CATEGORIES.find((c) => c.id === topic.categoryId) || FORUM_CATEGORIES[1];
     const linkedMark = topic.markId ? getMarkById(topic.markId, state.marks) : null;
     const topicReplies = state.replies.filter((r) => r.topicId === topic.id);
 
     const card = document.createElement("article");
     card.className = "forum-topic-card";
+    if (isPending) {
+      card.style.borderColor = "rgba(245, 158, 11, 0.55)";
+    }
+
     card.innerHTML = `
       <div style="flex:1;">
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px;">
+          ${isPending ? `<span class="badge-pill badge-warn">⏳ Pending Admin Approval</span>` : ""}
           ${topic.pinned ? `<span class="badge-pill badge-gold">📌 Pinned</span>` : ""}
           <span class="badge-pill badge-info">${escapeHtml(cat.badge)}</span>
           ${linkedMark ? `<span class="badge-pill">📍 ${escapeHtml(linkedMark.name)}</span>` : ""}
@@ -1115,19 +1127,37 @@ function renderForumTab() {
         <p class="muted" style="font-size:0.86rem;">${escapeHtml(topic.body)}</p>
       </div>
 
-      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px; min-width:120px;">
-        <span class="badge-pill">💬 ${topicReplies.length} Replies</span>
-        <button type="button" class="btn btn-outline btn-sm" data-upvote-topic="${topic.id}">
-          👍 ${Number(topic.upvotes) || 0} Helpful
-        </button>
+      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px; min-width:135px;">
+        ${
+          isPending && state.isAdmin
+            ? `<button type="button" class="btn btn-primary btn-sm" data-approve-topic="${topic.id}">✅ Approve Subject</button>`
+            : `<span class="badge-pill">💬 ${topicReplies.length} Replies</span>`
+        }
+        ${
+          !isPending
+            ? `<button type="button" class="btn btn-outline btn-sm" data-upvote-topic="${topic.id}">
+                👍 ${Number(topic.upvotes) || 0} Helpful
+              </button>`
+            : ""
+        }
       </div>
     `;
 
     card.addEventListener("click", (e) => {
+      const approveBtn = e.target.closest("[data-approve-topic]");
+      if (approveBtn) {
+        e.stopPropagation();
+        approveForumSubject(topic.id);
+        return;
+      }
       const upvoteBtn = e.target.closest("[data-upvote-topic]");
       if (upvoteBtn) {
         e.stopPropagation();
         handleUpvoteTopic(topic.id);
+        return;
+      }
+      if (isPending && !state.isAdmin) {
+        showToast("⏳ This subject is awaiting Admin approval before replies open.");
         return;
       }
       openTopicThreadModal(topic.id);
@@ -1135,6 +1165,47 @@ function renderForumTab() {
 
     listEl.appendChild(card);
   });
+}
+
+function openNewTopicModal() {
+  if (!state.user) {
+    document.getElementById("authModal")?.classList.remove("hidden");
+    return;
+  }
+  const notice = document.getElementById("topicApprovalNotice");
+  const submitBtn = document.getElementById("btnSubmitNewTopic");
+  if (state.isAdmin) {
+    if (notice) notice.textContent = "🛡️ Admin Mode: Your subject will be published immediately.";
+    if (submitBtn) submitBtn.textContent = "🚀 Publish Approved Subject";
+  } else {
+    if (notice) {
+      notice.textContent =
+        "🛡️ Note: New forum subjects must be approved by the Admin before appearing to all members.";
+    }
+    if (submitBtn) submitBtn.textContent = "🚀 Submit Subject for Admin Approval";
+  }
+  document.getElementById("newTopicModal")?.classList.remove("hidden");
+}
+
+async function approveForumSubject(topicId) {
+  if (!state.isAdmin) return;
+  const topic = state.topics.find((t) => t.id === topicId);
+  if (!topic) return;
+
+  topic.status = "approved";
+  saveLocalState();
+
+  if (state.firebaseReady && state.fbDb) {
+    try {
+      const { doc, setDoc } = state.fbModules;
+      await setDoc(doc(state.fbDb, "forum_topics", topic.id), topic);
+    } catch (e) {
+      console.warn("Could not sync topic approval:", e);
+    }
+  }
+
+  renderAll();
+  showToast(`✅ Approved forum subject: "${topic.title}"`);
 }
 
 function openTopicThreadModal(topicId) {
@@ -1223,10 +1294,12 @@ function renderAdminTab() {
   const adminPanel = document.getElementById("tab-admin");
   const lockedCard = document.getElementById("adminLockedCard");
   const dashBox = document.getElementById("adminDashboardContent");
+  const pendingBadge = document.getElementById("adminPendingForumBadge");
 
-  // Hide Admin tab in navigation when user is NOT signed in
-  if (!state.user) {
+  // Strictly hide the Admin tab unless the signed-in user IS the verified Admin
+  if (!state.user || !state.isAdmin) {
     adminNavTab?.classList.add("hidden");
+    pendingBadge?.classList.add("hidden");
     if (adminPanel?.classList.contains("active")) {
       switchTab("directory");
     }
@@ -1234,19 +1307,73 @@ function renderAdminTab() {
   }
 
   adminNavTab?.classList.remove("hidden");
-
-  if (!state.isAdmin) {
-    lockedCard?.classList.remove("hidden");
-    dashBox?.classList.add("hidden");
-    return;
-  }
-
   lockedCard?.classList.add("hidden");
   dashBox?.classList.remove("hidden");
 
-  document.getElementById("adminMarkCount").textContent = state.marks.length;
-  document.getElementById("adminTopicCount").textContent = state.topics.length;
+  const pendingTopics = state.topics.filter((t) => t.status === "pending");
+  const approvedTopics = state.topics.filter((t) => (t.status || "approved") === "approved");
 
+  if (pendingBadge) {
+    if (pendingTopics.length > 0) {
+      pendingBadge.textContent = pendingTopics.length;
+      pendingBadge.classList.remove("hidden");
+    } else {
+      pendingBadge.classList.add("hidden");
+    }
+  }
+
+  document.getElementById("adminPendingCount").textContent = pendingTopics.length;
+  document.getElementById("adminMarkCount").textContent = state.marks.length;
+  document.getElementById("adminTopicCount").textContent = approvedTopics.length;
+
+  // 1. Render Pending Forum Subjects Awaiting Approval
+  const pendingList = document.getElementById("adminPendingTopicsList");
+  if (pendingList) {
+    pendingList.innerHTML = "";
+    if (pendingTopics.length === 0) {
+      pendingList.innerHTML = `<p class="muted">✅ All forum subjects have been reviewed. No pending subjects right now.</p>`;
+    } else {
+      pendingTopics.forEach((t) => {
+        const row = document.createElement("div");
+        row.className = "admin-item-row";
+        row.style.borderColor = "rgba(245, 158, 11, 0.5)";
+        row.innerHTML = `
+          <div style="flex:1;">
+            <span class="badge-pill badge-warn">⏳ Pending Approval</span>
+            <strong style="display:block; margin-top:4px;">${escapeHtml(t.title)}</strong>
+            <span class="muted" style="display:block; font-size:0.78rem; margin:2px 0;">
+              Submitted by <strong>${escapeHtml(t.authorName)}</strong> • ${formatDateShort(t.createdAt)}
+            </span>
+            <p class="muted" style="font-size:0.82rem; margin-top:4px;">${escapeHtml(t.body)}</p>
+          </div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button type="button" class="btn btn-primary btn-sm" data-admin-approve="${t.id}">
+              ✅ Approve Subject
+            </button>
+            <button type="button" class="btn btn-danger-ghost btn-sm" data-admin-reject="${t.id}">
+              🗑️ Reject
+            </button>
+          </div>
+        `;
+        row.querySelector("[data-admin-approve]")?.addEventListener("click", () => {
+          approveForumSubject(t.id);
+        });
+        row.querySelector("[data-admin-reject]")?.addEventListener("click", async () => {
+          state.topics = state.topics.filter((x) => x.id !== t.id);
+          saveLocalState();
+          if (state.firebaseReady && state.fbDb) {
+            const { doc, deleteDoc } = state.fbModules;
+            await deleteDoc(doc(state.fbDb, "forum_topics", t.id));
+          }
+          renderAll();
+          showToast("🗑️ Rejected and removed pending subject.");
+        });
+        pendingList.appendChild(row);
+      });
+    }
+  }
+
+  // 2. Render Fishing Marks Manager (Admin Only)
   const marksList = document.getElementById("adminMarksManagerList");
   if (marksList) {
     marksList.innerHTML = "";
@@ -1280,10 +1407,11 @@ function renderAdminTab() {
     });
   }
 
+  // 3. Render Approved Forum Subjects Moderation
   const forumList = document.getElementById("adminForumManagerList");
   if (forumList) {
     forumList.innerHTML = "";
-    state.topics.forEach((t) => {
+    approvedTopics.forEach((t) => {
       const row = document.createElement("div");
       row.className = "admin-item-row";
       row.innerHTML = `
@@ -1511,17 +1639,15 @@ function bindUIEvents() {
 
   // Open New Topic Modal
   document.getElementById("btnOpenNewTopicModal")?.addEventListener("click", () => {
-    if (!state.user) {
-      document.getElementById("authModal")?.classList.remove("hidden");
-      return;
-    }
-    document.getElementById("newTopicModal")?.classList.remove("hidden");
+    openNewTopicModal();
   });
 
-  // Submit New Forum Topic
+  // Submit New Forum Topic (Requires Admin Approval unless submitted by Admin)
   document.getElementById("newTopicForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!state.user) return;
+
+    const initialStatus = state.isAdmin ? "approved" : "pending";
 
     const newTopic = {
       id: "topic-" + Date.now(),
@@ -1531,6 +1657,7 @@ function bindUIEvents() {
       authorId: state.user.uid,
       authorName: state.user.displayName,
       createdAt: new Date().toISOString(),
+      status: initialStatus,
       pinned: false,
       upvotes: 1,
       body: document.getElementById("topicBodyInput").value.trim(),
@@ -1553,7 +1680,11 @@ function bindUIEvents() {
     document.getElementById("newTopicModal")?.classList.add("hidden");
     renderForumTab();
     renderAdminTab();
-    showToast("🚀 Forum topic published!");
+    showToast(
+      state.isAdmin
+        ? "🚀 Forum subject published!"
+        : "⏳ Subject submitted! It will appear to members once approved by the Admin."
+    );
   });
 
   // Submit New Reply inside Thread Modal
@@ -1591,8 +1722,12 @@ function bindUIEvents() {
     showToast("💬 Reply posted!");
   });
 
-  // Admin: Open New Mark Modal
+  // Admin: Open New Mark Modal (Strictly Admin Only)
   document.getElementById("btnOpenNewMarkModal")?.addEventListener("click", () => {
+    if (!state.isAdmin) {
+      showToast("🛡️ Only the Admin can add new fishing marks.");
+      return;
+    }
     document.getElementById("newMarkModal")?.classList.remove("hidden");
   });
 

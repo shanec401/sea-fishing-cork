@@ -30,10 +30,14 @@ Every shore mark includes:
 - **Rising Tide Cut-Off Alerts**: Dedicated warnings on marks where flooding gullies, sandbars, or rock ledges cut off access (e.g., *Garryvoe*, *Garretstown*, *Sandycove Island spit*, *Courtmacsherry banks*, *Roches Point*), with active banners when the tide is flooding.
 - **Swell & Atlantic Gales Monitor**: Automatically compares live wind speed and Atlantic swell height/period against each mark's safe threshold—flagging exposed rock marks like **Dursey Sound**, **Old Head of Kinsale**, and **Roches Point** when heavy groundswell makes rock ledges unsafe.
 
-### 5. 💬 Members-Only County Cork Anglers Forum (Firebase Auth + Firestore)
-- **Protected by Login**: Visitors who are not signed in see a **Members-Only Forum Lock** screen. Only signed-in users can read threads, post new topics, reply, and upvote helpful local advice.
+### 5. 💬 Members-Only County Cork Anglers Forum & Admin Subject Approval
+- **Protected by Login**: Visitors who are not signed in see a **Members-Only Forum Lock** screen. Only signed-in users can read approved threads and post replies.
+- **Admin Subject Approval Workflow**: When a member submits a new forum subject, it is created with `status: "pending"` and remains hidden from the public forum until the **Admin** approves it (`status: "approved"`).
 - **Topic Categories & Mark Filtering**: Filter discussions by `📍 Fishing Marks & Venue Tips`, `🐟 Catch Reports & Sessions`, `🪱 Bait, Rigs & Lure Tactics`, or `⚠️ Swell, Weed & Safety Alerts`—or filter by any of the 23 County Cork fishing marks!
-- **Hidden Admin Tab**: The **🛡️ Admin** tab is completely hidden when logged out, and unlocks for verified Admins (`/admins/{uid}`) to add new Cork fishing marks or pin/delete forum threads.
+- **Exclusive Admin Control Center**: The **🛡️ Admin** tab is **completely hidden for all non-admin users** and only appears when your verified Admin account (`/admins/{uid}`) is signed in. Only the Admin can:
+  1. **Approve or Reject** submitted forum subjects (`⏳ Pending Forum Subjects Awaiting Admin Approval`).
+  2. **Add new County Cork fishing marks** or delete custom marks (`/cork_marks/{markId}`).
+  3. **Pin or Delete** existing forum threads.
 
 ---
 

@@ -21,7 +21,7 @@ service cloud.firestore {
     }
 
     // ========================================================================
-    // 1. ADMINS (/admins/{uid}) — Shared Admin UID Verification
+    // 1. ADMINS (/admins/{uid}) — Exclusive Admin UID Verification
     // ========================================================================
     match /admins/{uid} {
       allow read: if isSignedIn();
@@ -30,8 +30,8 @@ service cloud.firestore {
 
     // ========================================================================
     // 2. CORK SHORE ANGLER — SHORE MARKS DIRECTORY (/cork_marks/{markId})
-    //    - Publicly readable so visitors can browse County Cork fishing marks
-    //    - Only Admins can add, edit, or delete marks
+    //    - Publicly readable so anglers can view County Cork fishing marks
+    //    - ONLY the Admin can add, edit, or delete fishing marks
     // ========================================================================
     match /cork_marks/{markId} {
       allow read: if true;
@@ -39,15 +39,27 @@ service cloud.firestore {
     }
 
     // ========================================================================
-    // 3. CORK SHORE ANGLER — MEMBERS-ONLY FORUM TOPICS (/forum_topics/{topicId})
-    //    - ONLY signed-in anglers can read or create forum topics
-    //    - Signed-in anglers can upvote or edit their own topic; Admins can pin/delete
+    // 3. CORK SHORE ANGLER — MEMBERS-ONLY FORUM SUBJECTS (/forum_topics/{topicId})
+    //    - ONLY signed-in users can read forum subjects
+    //    - Regular users can ONLY submit new subjects with status == 'pending'
+    //    - ONLY the Admin can approve subjects (status == 'approved'), pin, or delete
     // ========================================================================
     match /forum_topics/{topicId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
-      allow update: if isSignedIn();
-      allow delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+
+      allow create: if isAdmin() || (
+        isSignedIn() &&
+        request.resource.data.authorId == request.auth.uid &&
+        request.resource.data.status == 'pending'
+      );
+
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        request.resource.data.status == resource.data.status &&
+        request.resource.data.authorId == resource.data.authorId
+      );
+
+      allow delete: if isAdmin();
     }
 
     // ========================================================================
