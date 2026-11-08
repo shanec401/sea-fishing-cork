@@ -1,0 +1,110 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ========================================================================
+    // HELPER FUNCTIONS
+    // ========================================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isApprovedFor(compId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/registrations/$(compId + '__' + request.auth.uid)) &&
+        get(/databases/$(database)/documents/registrations/$(compId + '__' + request.auth.uid)).data.status == 'approved';
+    }
+
+    // ========================================================================
+    // 1. ADMINS (/admins/{uid}) — Shared Admin UID Verification
+    // ========================================================================
+    match /admins/{uid} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ========================================================================
+    // 2. CORK SHORE ANGLER — SHORE MARKS DIRECTORY (/cork_marks/{markId})
+    //    - Publicly readable so visitors can browse County Cork fishing marks
+    //    - Only Admins can add, edit, or delete marks
+    // ========================================================================
+    match /cork_marks/{markId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ========================================================================
+    // 3. CORK SHORE ANGLER — MEMBERS-ONLY FORUM TOPICS (/forum_topics/{topicId})
+    //    - ONLY signed-in anglers can read or create forum topics
+    //    - Signed-in anglers can upvote or edit their own topic; Admins can pin/delete
+    // ========================================================================
+    match /forum_topics/{topicId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isSignedIn();
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+    }
+
+    // ========================================================================
+    // 4. CORK SHORE ANGLER — MEMBERS-ONLY FORUM REPLIES (/forum_replies/{replyId})
+    //    - ONLY signed-in anglers can read or post replies
+    // ========================================================================
+    match /forum_replies/{replyId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+    }
+
+    // ========================================================================
+    // 5. ARENAPICK COLLECTIONS (Preserved so both apps can share one Firebase DB)
+    // ========================================================================
+    match /competitions/{compId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /registrations/{regId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (
+        isAdmin() ||
+        (regId == request.resource.data.competitionId + '__' + request.auth.uid
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.status in ['pending', 'approved'])
+      );
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.status == resource.data.status
+      );
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    match /games/{gameId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /predictions/{predId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (
+        isAdmin() || (
+          predId == request.resource.data.gameId + '__' + request.auth.uid &&
+          request.resource.data.userId == request.auth.uid &&
+          (request.resource.data.requiresApproval == false || isApprovedFor(request.resource.data.competitionId))
+        )
+      );
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == request.auth.uid
+      );
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+  }
+}
