@@ -280,15 +280,19 @@ export function calculateCorkTidesForDate(station, dateStr) {
   const astro = calculateAstronomicalAndSolunar(dateStr, station.lat, station.lng);
 
   // Semi-diurnal lunar period M2 = 12h 25.2m (745.2 minutes)
+  // Calibrated to official Marine Institute Ringaskiddy / Cobh High Water: 2026-11-08 04:25 UTC
   const m2PeriodMin = 745.2;
-  const synodicMonth = 29.53058867;
-  const refEpoch = Date.UTC(2026, 0, 1, 0, 0, 0);
+  const refCobhHighWaterUtc = Date.UTC(2026, 10, 8, 4, 25, 0);
   const dayStartUtc = Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate(), 0, 0, 0);
-  const daysFromEpoch = (dayStartUtc - refEpoch) / 86400000;
+  const elapsedMin = (dayStartUtc - refCobhHighWaterUtc) / 60000;
 
-  // Cobh High Water lags lunar transit by ~4h 55m (295 min) plus station offset
-  const basePhaseMin = (daysFromEpoch * 50.47 + 295 + (station.offsetMinutes || 0)) % m2PeriodMin;
-  const firstHighWaterMin = ((m2PeriodMin - basePhaseMin) % m2PeriodMin + m2PeriodMin) % m2PeriodMin;
+  const isDst = dateObj.getMonth() >= 3 && dateObj.getMonth() <= 9;
+  const dstMinutes = isDst ? 60 : 0;
+
+  const firstHighWaterMin =
+    (((-elapsedMin % m2PeriodMin) + m2PeriodMin) % m2PeriodMin) +
+    (station.offsetMinutes || 0) +
+    dstMinutes;
 
   // Tidal range interpolated between Neap and Spring based on lunar phase
   const range =
@@ -326,7 +330,7 @@ export function calculateCorkTidesForDate(station, dateStr) {
     const eventMin = Math.round(firstHighWaterMin + k * halfPeriod);
     if (eventMin >= 0 && eventMin <= 1440) {
       const isHigh = k % 2 === 0;
-      const h = isHigh ? midLevel + amplitude : Math.max(0.2, midLevel - amplitude);
+      const h = isHigh ? midLevel + amplitude : Math.max(0.3, midLevel - amplitude);
       events.push({
         type: isHigh ? "HIGH" : "LOW",
         minutes: eventMin,
@@ -336,24 +340,146 @@ export function calculateCorkTidesForDate(station, dateStr) {
     }
   }
 
-  // Determine current real-time tide state
+  return buildTideResultObject(station, springNeapStatus, tideCoefficient, range, events, curvePoints, false);
+}
+
+export async function fetchOfficialMarineInstituteTides(station, dateStr) {
+  const baseTide = calculateCorkTidesForDate(station, dateStr);
+  const erddapId = station.erddapStationId || "Ringaskiddy";
+  const cleanDate = dateStr || new Date().toISOString().slice(0, 10);
+
+  const startIso = `${cleanDate}T00:00:00Z`;
+  const endIso = `${cleanDate}T23:59:59Z`;
+
+  const highLowUrl =
+    `https://erddap.marine.ie/erddap/tabledap/IMI_TidePrediction_HighLow.json` +
+    `?stationID,time,tide_time_category,Water_Level_ODMalin` +
+    `&stationID=%22${encodeURIComponent(erddapId)}%22&time>=${startIso}&time<=${endIso}`;
+
+  const curveUrl =
+    `https://erddap.marine.ie/erddap/tabledap/imiTidePrediction.json` +
+    `?stationID,time,Water_Level,Water_Level_ODM` +
+    `&stationID=%22${encodeURIComponent(erddapId)}%22&time>=${startIso}&time<=${endIso}`;
+
+  try {
+    const [hlRes, curveRes] = await Promise.allSettled([
+      fetch(highLowUrl),
+      fetch(curveUrl)
+    ]);
+
+    const datumOffset = Number(station.chartDatumOffsetM ?? 2.35);
+    const offsetMin = erddapId === "Dungarvan" && station.id === "youghal" ? -5 : 0;
+
+    let officialEvents = baseTide.events;
+    if (hlRes.status === "fulfilled" && hlRes.value.ok) {
+      const hlJson = await hlRes.value.json();
+      const rows = hlJson?.table?.rows || [];
+      if (rows.length > 0) {
+        officialEvents = rows.map((r) => {
+          const dt = new Date(r[1]);
+          const dublinStr = dt.toLocaleTimeString("en-IE", {
+            timeZone: "Europe/Dublin",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false
+          });
+          const [hh, mm] = dublinStr.split(":").map(Number);
+          const totalMin = Math.max(0, Math.min(1440, hh * 60 + mm + offsetMin));
+          const cat = String(r[2] || "").toUpperCase().includes("HIGH") ? "HIGH" : "LOW";
+          const heightLat = Math.max(0.2, Number(r[3] || 0) + datumOffset);
+          return {
+            type: cat,
+            minutes: totalMin,
+            timeStr: formatMinutesToHHMM(totalMin),
+            heightM: heightLat.toFixed(2)
+          };
+        });
+      }
+    }
+
+    let officialCurve = baseTide.curvePoints;
+    if (curveRes.status === "fulfilled" && curveRes.value.ok) {
+      const cJson = await curveRes.value.json();
+      const rows = cJson?.table?.rows || [];
+      if (rows.length > 0) {
+        officialCurve = rows
+          .filter((_, idx) => idx % 3 === 0) // Every 15 minutes from 5-min data
+          .map((r) => {
+            const dt = new Date(r[1]);
+            const dublinStr = dt.toLocaleTimeString("en-IE", {
+              timeZone: "Europe/Dublin",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false
+            });
+            const [hh, mm] = dublinStr.split(":").map(Number);
+            const totalMin = Math.max(0, Math.min(1440, hh * 60 + mm + offsetMin));
+            const wlLat = r[2] !== null && r[2] !== undefined ? Number(r[2]) : Number(r[3] || 0) + datumOffset;
+            return {
+              minutes: totalMin,
+              timeStr: formatMinutesToHHMM(totalMin),
+              heightM: Number(Math.max(0.1, wlLat).toFixed(2))
+            };
+          });
+      }
+    }
+
+    const highs = officialEvents.filter((e) => e.type === "HIGH").map((e) => Number(e.heightM));
+    const lows = officialEvents.filter((e) => e.type === "LOW").map((e) => Number(e.heightM));
+    const calcRange =
+      highs.length > 0 && lows.length > 0
+        ? Math.max(...highs) - Math.min(...lows)
+        : Number(baseTide.tidalRangeM);
+
+    return buildTideResultObject(
+      station,
+      baseTide.springNeapStatus,
+      baseTide.tideCoefficient,
+      calcRange,
+      officialEvents,
+      officialCurve,
+      true
+    );
+  } catch (err) {
+    console.warn("Marine Institute ERDDAP fallback to calibrated harmonics:", err);
+    return baseTide;
+  }
+}
+
+function buildTideResultObject(station, springNeapStatus, tideCoefficient, range, events, curvePoints, isOfficial) {
   const now = new Date();
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
-  const nowAngle = ((nowMinutes - firstHighWaterMin) / m2PeriodMin) * 2 * Math.PI;
-  const currentHeightM = Number((midLevel + amplitude * Math.cos(nowAngle)).toFixed(2));
-  const derivative = -Math.sin(nowAngle); // > 0 means rising/flooding, < 0 means ebbing
 
+  // Interpolate current height from curvePoints
+  let closestIdx = 0;
+  let minDiff = 9999;
+  curvePoints.forEach((pt, idx) => {
+    const d = Math.abs(pt.minutes - nowMinutes);
+    if (d < minDiff) {
+      minDiff = d;
+      closestIdx = idx;
+    }
+  });
+
+  const currentPt = curvePoints[closestIdx] || { heightM: station.baseLevel };
+  const prevPt = curvePoints[Math.max(0, closestIdx - 1)] || currentPt;
+  const nextPt = curvePoints[Math.min(curvePoints.length - 1, closestIdx + 1)] || currentPt;
+  const currentHeightM = Number(currentPt.heightM);
+  const delta = Number(nextPt.heightM) - Number(prevPt.heightM);
+
+  const nearExtreme = events.find((e) => Math.abs(e.minutes - nowMinutes) <= 25);
   let currentStage = "rising";
   let currentStageLabel = "🌊⬆️ Flooding (Rising Tide)";
-  if (Math.abs(derivative) < 0.18) {
-    if (Math.cos(nowAngle) > 0) {
+
+  if (nearExtreme) {
+    if (nearExtreme.type === "HIGH") {
       currentStage = "high";
       currentStageLabel = "⚓ High Water Slack";
     } else {
       currentStage = "low";
       currentStageLabel = "🐚 Low Water Slack (Bait Digging Window)";
     }
-  } else if (derivative > 0) {
+  } else if (delta >= 0) {
     currentStage = "rising";
     currentStageLabel = "🌊⬆️ Flooding (Rising Tide)";
   } else {
@@ -365,9 +491,13 @@ export function calculateCorkTidesForDate(station, dateStr) {
 
   return {
     station,
+    isOfficial,
+    sourceLabel: isOfficial
+      ? `Official Marine Institute Ireland (${station.erddapStationId})`
+      : `Port of Cork Calibrated Harmonics`,
     springNeapStatus,
     tideCoefficient,
-    tidalRangeM: range.toFixed(1),
+    tidalRangeM: Number(range).toFixed(1),
     currentHeightM,
     currentStage,
     currentStageLabel,

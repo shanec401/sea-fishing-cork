@@ -19,14 +19,15 @@ import {
   getRegionById,
   getTideStationById,
   getMarkById
-} from "./cork-data.js";
+} from "./cork-data.js?v=4";
 
 import {
   fetchLiveCorkMarineAndWeather,
   calculateAstronomicalAndSolunar,
   calculateCorkTidesForDate,
+  fetchOfficialMarineInstituteTides,
   evaluateMarkSafety
-} from "./marine-api.js";
+} from "./marine-api.js?v=4";
 
 const state = {
   selectedRegionId: "ALL",
@@ -172,14 +173,42 @@ function recalculateTidesAndAstro() {
     station.lng
   );
   state.tideData = calculateCorkTidesForDate(station, state.selectedDate);
+  syncOfficialMarineInstituteTides(station, state.selectedDate);
+}
+
+async function syncOfficialMarineInstituteTides(station, dateStr) {
+  try {
+    const officialTide = await fetchOfficialMarineInstituteTides(station, dateStr);
+    if (
+      station.id === state.activeStationId &&
+      dateStr === state.selectedDate &&
+      officialTide
+    ) {
+      state.tideData = officialTide;
+      renderHeroTelemetry();
+      renderGlobalSafetyBanner();
+      renderMarineDashboard();
+      renderSafetyTab();
+    }
+  } catch (e) {
+    console.warn("Official tide sync note:", e);
+  }
 }
 
 async function refreshLiveMarineTelemetry() {
   const activeMark = getActiveMark();
   const lat = activeMark ? activeMark.lat : 51.8292;
   const lng = activeMark ? activeMark.lng : -8.0008;
+  const station = getTideStationById(state.activeStationId);
 
-  state.marineData = await fetchLiveCorkMarineAndWeather(lat, lng);
+  const [marine, officialTide] = await Promise.all([
+    fetchLiveCorkMarineAndWeather(lat, lng),
+    fetchOfficialMarineInstituteTides(station, state.selectedDate)
+  ]);
+
+  state.marineData = marine;
+  if (officialTide) state.tideData = officialTide;
+
   renderHeroTelemetry();
   renderGlobalSafetyBanner();
   renderActiveMarkSpotlight();
@@ -704,7 +733,9 @@ function renderMarineDashboard() {
   const marine = state.marineData;
   if (!tide || !astro) return;
 
-  document.getElementById("tideStationBadge").textContent = tide.station.name;
+  document.getElementById("tideStationBadge").textContent = tide.sourceLabel
+    ? `${tide.station.name} • ${tide.sourceLabel}`
+    : tide.station.name;
   document.getElementById("springNeapBadge").textContent = tide.springNeapStatus;
   document.getElementById("tidalRangeBadge").textContent = `Tidal Range: ${tide.tidalRangeM}m`;
 
@@ -1295,18 +1326,31 @@ function renderAdminTab() {
   const lockedCard = document.getElementById("adminLockedCard");
   const dashBox = document.getElementById("adminDashboardContent");
   const pendingBadge = document.getElementById("adminPendingForumBadge");
+  const uidEl = document.getElementById("currentUserUidDisplay");
 
-  // Strictly hide the Admin tab unless the signed-in user IS the verified Admin
-  if (!state.user || !state.isAdmin) {
+  // Hide the Admin tab when not signed in
+  if (!state.user) {
     adminNavTab?.classList.add("hidden");
     pendingBadge?.classList.add("hidden");
+    if (uidEl) uidEl.textContent = "Not signed in — please Sign In first";
     if (adminPanel?.classList.contains("active")) {
       switchTab("directory");
     }
     return;
   }
 
+  // Show the Admin tab when signed in so you can click it to get your UID
   adminNavTab?.classList.remove("hidden");
+  if (uidEl) uidEl.textContent = state.user.uid;
+
+  // If the signed-in user is NOT in /admins/{uid}, show the UID setup card and keep all Admin tools locked
+  if (!state.isAdmin) {
+    pendingBadge?.classList.add("hidden");
+    lockedCard?.classList.remove("hidden");
+    dashBox?.classList.add("hidden");
+    return;
+  }
+
   lockedCard?.classList.add("hidden");
   dashBox?.classList.remove("hidden");
 
@@ -1482,10 +1526,15 @@ function renderAuthUI() {
   if (state.user) {
     area.innerHTML = `
       <div class="user-chip">
-        <span>${state.isAdmin ? "🛡️" : "🎣"} ${escapeHtml(state.user.displayName)}</span>
+        <span title="Your UID: ${escapeHtml(state.user.uid)}">${state.isAdmin ? "🛡️" : "🎣"} ${escapeHtml(state.user.displayName)}</span>
+        <button id="btnCopyMyUidTop" type="button" class="btn btn-ghost btn-sm" style="padding:3px 7px;" title="Copy your Firebase User UID (${escapeHtml(state.user.uid)})">📋 UID</button>
         <button id="btnSignOut" type="button" class="btn btn-ghost btn-sm" style="padding:3px 8px;">Sign Out</button>
       </div>
     `;
+    document.getElementById("btnCopyMyUidTop")?.addEventListener("click", () => {
+      navigator.clipboard.writeText(state.user.uid);
+      showToast(`📋 Copied your UID: ${state.user.uid}`);
+    });
     document.getElementById("btnSignOut")?.addEventListener("click", async () => {
       if (state.firebaseReady && state.fbAuth) {
         await state.fbModules.signOut(state.fbAuth);

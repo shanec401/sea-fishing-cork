@@ -301,31 +301,39 @@
     <!-- TAB 5: ADMIN CONTROL CENTER (Hidden when logged out)               -->
     <!-- ================================================================== -->
     <section id="tab-admin" class="tab-panel">
+      <!-- Always visible on the Admin tab so you can click to get your UID anytime -->
+      <div class="dashboard-card" style="margin-bottom:18px; border-color:rgba(14,165,233,0.45);">
+        <div class="card-header-bar" style="margin-bottom:6px;">
+          <div>
+            <span class="badge-pill badge-info">🔑 Your Firebase Account ID</span>
+            <h3 style="margin-top:4px;">Get Your Firebase User UID for Admin Access</h3>
+            <p class="muted">Click the button below to copy your personal Firebase UID, then add it as a Document ID under the <code>admins</code> collection in Firebase Firestore.</p>
+          </div>
+          <button id="btnRefreshAdminStatus" type="button" class="btn btn-outline btn-sm">🔄 Verify Admin Status</button>
+        </div>
+        <div class="uid-copy-row" style="margin-top:10px;">
+          <code id="currentUserUidDisplay" style="font-size:0.95rem; font-weight:700; color:#7dd3fc;">Not signed in — please Sign In first</code>
+          <button id="btnCopyUid" type="button" class="btn btn-primary btn-sm">📋 Click to Copy My UID</button>
+        </div>
+      </div>
+
       <div id="adminLockedCard" class="locked-gate-card" style="text-align:left;">
         <div style="display:flex; align-items:center; gap:14px; margin-bottom:16px;">
           <span style="font-size:2.4rem;">🛡️</span>
           <div>
-            <h2>Cork Shore Angler — Admin &amp; Moderator Access</h2>
+            <h2>Cork Shore Angler — Admin &amp; Moderator Access Required</h2>
             <p class="muted">Protected by Cloud Firestore Security Rules (<code>/admins/{uid}</code>).</p>
           </div>
         </div>
 
         <div class="admin-bootstrap-box">
-          <h3>🔑 How to Add Your User UID as an Admin in Firebase</h3>
+          <h3>🔑 Step-by-Step: Add Your UID as Admin in Firebase</h3>
           <ol class="admin-steps-list">
-            <li>Copy your signed-in Firebase User UID below:</li>
-          </ol>
-          <div class="uid-copy-row">
-            <code id="currentUserUidDisplay">Not signed in</code>
-            <button id="btnCopyUid" type="button" class="btn btn-outline btn-sm">📋 Copy UID</button>
-          </div>
-          <ol class="admin-steps-list" start="2">
+            <li>Click <strong>"📋 Click to Copy My UID"</strong> in the box above.</li>
             <li>Open your <strong>Firebase Console &rarr; Firestore Database &rarr; Data</strong>.</li>
             <li>Create or open the <code>admins</code> collection, paste your <strong>UID</strong> as the <strong>Document ID</strong>, add field <code>role</code> = <code>"admin"</code>, and click <strong>Save</strong>.</li>
+            <li>Click <strong>"🔄 Verify Admin Status"</strong> above to unlock the Admin Control Center!</li>
           </ol>
-          <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
-            <button id="btnRefreshAdminStatus" type="button" class="btn btn-primary">🔄 Verify Admin Status</button>
-          </div>
         </div>
       </div>
 
@@ -621,6 +629,6 @@
   <!-- Toast Container -->
   <div id="toastContainer" class="toast-container no-print" aria-live="polite"></div>
 
-  <script type="module" src="./app.js?v=2"></script>
+  <script type="module" src="./app.js?v=4"></script>
 </body>
 </html>

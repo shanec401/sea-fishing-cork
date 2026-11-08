@@ -43,63 +43,87 @@ export const CORK_REGIONS = [
 export const CORK_TIDE_STATIONS = [
   {
     id: "cobh",
-    name: "Cobh (Cork Harbour)",
+    name: "Cobh / Ringaskiddy (Cork Harbour)",
+    erddapStationId: "Ringaskiddy",
+    chartDatumOffsetM: 2.43,
     lat: 51.8503,
     lng: -8.2943,
     offsetMinutes: 0,
     meanSpringRange: 4.1,
     meanNeapRange: 2.1,
-    baseLevel: 2.3
+    baseLevel: 2.35
+  },
+  {
+    id: "crosshaven",
+    name: "Crosshaven & Outer Cork Harbour",
+    erddapStationId: "Crosshaven",
+    chartDatumOffsetM: 2.25,
+    lat: 51.7985,
+    lng: -8.2932,
+    offsetMinutes: -20,
+    meanSpringRange: 3.9,
+    meanNeapRange: 2.0,
+    baseLevel: 2.25
   },
   {
     id: "ballycotton",
     name: "Ballycotton Harbour (East Cork)",
+    erddapStationId: "Ballycotton",
+    chartDatumOffsetM: 2.38,
     lat: 51.8292,
     lng: -8.0008,
-    offsetMinutes: -12,
+    offsetMinutes: 0,
     meanSpringRange: 4.0,
     meanNeapRange: 2.0,
-    baseLevel: 2.2
+    baseLevel: 2.3
   },
   {
     id: "youghal",
-    name: "Youghal (Blackwater Estuary)",
+    name: "Youghal & Blackwater Estuary (East Cork)",
+    erddapStationId: "Dungarvan",
+    chartDatumOffsetM: 2.25,
     lat: 51.9519,
     lng: -7.8456,
-    offsetMinutes: -8,
+    offsetMinutes: -5,
     meanSpringRange: 3.9,
     meanNeapRange: 2.0,
     baseLevel: 2.2
   },
   {
     id: "kinsale",
-    name: "Kinsale (Bandon Estuary)",
+    name: "Kinsale & Bandon Estuary (South Cork)",
+    erddapStationId: "Kinsale",
+    chartDatumOffsetM: 2.2,
     lat: 51.7059,
     lng: -8.5222,
-    offsetMinutes: -18,
+    offsetMinutes: -25,
     meanSpringRange: 3.8,
     meanNeapRange: 1.9,
-    baseLevel: 2.1
+    baseLevel: 2.15
   },
   {
     id: "baltimore",
-    name: "Baltimore & Roaringwater Bay (West Cork)",
+    name: "Union Hall / Baltimore / Courtmacsherry (West Cork)",
+    erddapStationId: "Union_Hall",
+    chartDatumOffsetM: 2.1,
     lat: 51.4828,
     lng: -9.3736,
-    offsetMinutes: -34,
-    meanSpringRange: 3.4,
-    meanNeapRange: 1.7,
-    baseLevel: 1.9
+    offsetMinutes: -25,
+    meanSpringRange: 3.5,
+    meanNeapRange: 1.8,
+    baseLevel: 2.05
   },
   {
     id: "castletownbere",
     name: "Castletownbere & Beara (Bantry Bay)",
+    erddapStationId: "Castletownbere",
+    chartDatumOffsetM: 1.95,
     lat: 51.6508,
     lng: -9.9097,
     offsetMinutes: -45,
     meanSpringRange: 3.3,
     meanNeapRange: 1.6,
-    baseLevel: 1.85
+    baseLevel: 1.9
   }
 ];
 
